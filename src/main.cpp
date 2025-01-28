@@ -35,6 +35,9 @@ ESP8266WiFiMulti wifiMulti;
 //  Central Europe: "CET-1CEST,M3.5.0,M10.5.0/3"
 #define TZ_INFO "CET-1CEST,M3.5.0,M10.5.0/3"
 
+#define MODBUS_DIR_PIN 4 // connect DR, RE pin of MAX485 to gpio 4
+#define MODBUS_RX_PIN 16 // ESP32 Rx pin | Receiver Output (RO) of MAX485
+#define MODBUS_TX_PIN 17 // ESP32 Tx pin | Driver Input (DI) of MAX485
 #define MODBUS_BAUDRATE 9600 // 19200
 
 #define MODBUS_NRJ_METER_ADDR 5
@@ -58,20 +61,20 @@ float nrj_values[NRJ_ARRAY_SIZE];
 // Create a ModbusRTU client instance
 // In my case the RS485 module had auto halfduplex, so no second parameter with the DE/RE pin is required!
 HardwareSerial Serial_RS485(2);
-ModbusClientRTU MB(Serial_RS485);
+ModbusClientRTU MB(MODBUS_DIR_PIN);
 
 // InfluxDB client instance with preconfigured InfluxCloud certificate
 InfluxDBClient influxDBclient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
 
 // Data point
 Point wifi_sensor("wifi_status");
-Point nrj_points("nrj_points");
+Point nrj_points("nrj_points_soco");
 
 // Set Static IP address & gateway
-IPAddress local_IP(192, 168, 1, 165);
-IPAddress gateway(192, 168, 1, 1);
+IPAddress local_IP(192, 168, 1, 166);
+IPAddress gateway(192, 168, 1, 254);
 IPAddress subnet(255, 255, 255, 0);
-IPAddress dns1(192, 168, 1, 1);
+IPAddress dns1(192, 168, 1, 254);
 IPAddress dns2(0, 0, 0, 0);
 
 // Define an onData handler function to receive the regular responses
@@ -138,17 +141,17 @@ void handleData(ModbusMessage response, uint8_t token)
 
   // 3 REG_SOCO_ACTIV_POWER
   case 3:
-    nrj_values[3] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) * 0.1;
+    nrj_values[3] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
     break;
 
   // 4 REG_SOCO_REACT_POWER
   case 4:
-    nrj_values[4] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) * 0.1;
+    nrj_values[4] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
     break;
 
   // 10 REG_APPAR_POWER_TOTAL  2
   case 5:
-    nrj_values[5] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) * 0.01;
+    nrj_values[5] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.01;
     break;
 
   // 11 REG_VOLTAGE_PH1        2
@@ -208,10 +211,6 @@ void setup()
   while (!Serial) {}
   Serial.printf("__ SERIAL OK __\n");
 
-  // Baudrate, Serial param, TXD, RXD
-  // Baudrate 9600, Parity none, stop bit 1
-  Serial_RS485.begin(MODBUS_BAUDRATE, SERIAL_8N1, GPIO_NUM_17, GPIO_NUM_16);
-
   // ************************ InfluxDB init ************************ //
   // Setup wifi
   WiFi.mode(WIFI_AP_STA);
@@ -236,8 +235,9 @@ void setup()
     }
   }
 
-  // wifiMulti.addAP(WIFI_SSID_1, WIFI_PASSWORD_1);
-  wifiMulti.addAP(WIFI_SSID_4, WIFI_PASSWORD_4);
+  wifiMulti.addAP(WIFI_SSID_1, WIFI_PASSWORD_1);
+  wifiMulti.addAP(WIFI_SSID_2, WIFI_PASSWORD_2);
+  wifiMulti.addAP(WIFI_SSID_3, WIFI_PASSWORD_3);
 
   if (!WiFi.config(local_IP, gateway, subnet, dns1, dns2)){
     Serial.println("Failed to configure IP address !");
@@ -269,7 +269,7 @@ void setup()
   // Add tags
   wifi_sensor.addTag("device", DEVICE);
   wifi_sensor.addTag("SSID", WiFi.SSID());
-  nrj_points.addTag("legrand", "4 120 74");
+  nrj_points.addTag("socomec", "4850 3043");
 
   // Accurate time is necessary for certificate validation and writing in batches
   // For the fastest time sync find NTP servers in your area: https://www.pool.ntp.org/zone/
@@ -289,6 +289,12 @@ void setup()
 
   // ************************ MODBUS Init ************************ //
   // Set up ModbusRTU client.
+  RTUutils::prepareHardwareSerial(Serial_RS485);
+
+  // Baudrate, Serial param, TXD, RXD
+  // Baudrate 9600, Parity none, stop bit 1
+  Serial_RS485.begin(MODBUS_BAUDRATE, SERIAL_8N1, MODBUS_RX_PIN, MODBUS_TX_PIN);
+
   // - provide onData handler function
   MB.onDataHandler(&handleData);
   // - provide onError handler function
@@ -338,9 +344,7 @@ void Task_retrieve_modbus_params(void *pvParameters) // This is a task.
     data_ready = false;
     // Issue the request
 
-    vTaskDelay(pdMS_TO_TICKS(2000)); // 2000 / portTICK_PERIOD_MS);
-
-    /*---------- DANFOSS EKC 302D QUERIES ----------*/
+    vTaskDelay(pdMS_TO_TICKS(1000)); // 2000 / portTICK_PERIOD_MS);
 
     // Params : Token, Slave address, Function code, Register address, Length
     Error err = MB.addRequest(0, MODBUS_NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_SOCO_VOLTAGE, 2);
@@ -487,25 +491,13 @@ void Task_print_values(void *pvParameters) // This is a task.
   while (1) // A Task shall never return or exit.
   {
     Serial.println("\n---- Task_print_values ----");
-    vTaskDelay(pdMS_TO_TICKS(2000)); // 2000 / portTICK_PERIOD_MS);
+    vTaskDelay(pdMS_TO_TICKS(1000)); // 2000 / portTICK_PERIOD_MS);
 
-    // for (uint8_t i = 0; i < EKC_ARRAY_SIZE; i++)
-    // {
-    //   // Serial.printf("EKC values, array %d : %.02f\n", i, ekc_values[i]);
-    //   // WebSerial.print("EKC values, array : ");
-    //   // WebSerial.print(ekc_values[i]);
-    //   // WebSerial.println("");
-    // }
-
-    // Serial.printf("EKC state : %d\n\n", ekc_state);
-    // WebSerial.print("EKC state : ");
-    // WebSerial.print(ekc_state);
-    // WebSerial.println("");
-
-    // for (uint8_t i = 0; i < NRJ_ARRAY_SIZE; i++)
-    // {
-    //   Serial.printf("NRJ Values amps : %.3f\n", nrj_values[i]);
-    // }
+    Serial.printf("NRJ Voltage : %.2f V\n", nrj_values[0]);
+    Serial.printf("NRJ Current : %.2f A\n", nrj_values[1]);
+    Serial.printf("NRJ Frequency : %.2f Hz\n", nrj_values[2]);
+    Serial.printf("NRJ Active Power : %.2f W\n", nrj_values[3]);
+    Serial.printf("NRJ Reactive Power : %.2f VAR\n\n", nrj_values[4]);
 
   // Serial.print("unixtime : ");
   // Serial.println(now.unixtime(), DEC);
@@ -525,109 +517,10 @@ void Task_print_values(void *pvParameters) // This is a task.
   // Serial.println(now.second(), DEC);
   // Serial.println();
 
-  // Serial.print("High Pressure\t");
-  // Serial.print("\t|\t");
-  // Serial.print("Liquid Temp");
-  // Serial.print("\t|\t");
-  // Serial.print("Subcooling");
-  // Serial.print("\t|\t");
-  // Serial.print("Discharge Temp");
-  // Serial.print("\t|\t");
-  // Serial.print("Disch. Superheat");
-  // Serial.print("\t|\t");
-  // Serial.print("Low Pressure\t");
-  // Serial.print("\t|\t");
-  // Serial.print("Suction Temp");
-  // Serial.print("\t|\t");
-  // Serial.print("Superheat");
-  // Serial.print("\t|\t");
-  // Serial.print("Oil Pressure");
-  // Serial.print("\t|\t");
-  // Serial.print("oilDeltaP");
-  // Serial.print("\t|\t");
-  // Serial.print("outdoor temp");
-  // Serial.print("\t|\t");
-  // Serial.print("outdoor hum");
-  // Serial.println("\n");
-
-  // Serial.print(hpRelativePressure);
-  // Serial.print(" bar ");
-  // Serial.print(hpSaturationTemp);
-  // Serial.print("°C");
-  // Serial.print("\t|\t");
-  // Serial.print(liquidTemp);
-  // Serial.print("°C\t");
-  // Serial.print("\t|\t");
-  // Serial.print(subcooling);
-  // Serial.print(" K");
-  // Serial.print("\t|\t");
-  // Serial.print(dischargeTemp);
-  // Serial.print("°C\t");
-  // Serial.print("\t|\t");
-  // Serial.print(dischargeSuperheat);
-  // Serial.print(" K\t\t");
-  // Serial.print("\t|\t");
-  // Serial.print(lpRelativePressure);
-  // Serial.print(" bar ");
-  // Serial.print(lpSaturationTemp);
-  // Serial.print("°C");
-  // Serial.print("\t|\t");
-  // Serial.print(suctionTemp);
-  // Serial.print("°C\t");
-  // Serial.print("\t|\t");
-  // Serial.print(superheat);
-  // Serial.print(" K\t");
-  // Serial.print("\t|\t");
-  // Serial.print(oilRelativePressure);
-  // Serial.print(" bar ");
-  // Serial.print("\t|\t");
-  // Serial.print(oilDeltaP);
-  // Serial.println(" bar ");
-  // Serial.print("\t|\t");
-  // Serial.print(outdoorAirTemp);
-  // Serial.println("°C");
-  // Serial.print("\t|\t");
-  // Serial.print(outdoorAirHum);
-  // Serial.println("%");
-  // Serial.println("\n");
-
-  // Serial.print("ADC CH0");
-  // Serial.print("\t|\t");
-  // Serial.print("ADC CH1");
-  // Serial.print("\t|\t");
-  // Serial.print("ADC CH2");
-  // Serial.print("\t|\t");
-  // Serial.println("ADC CH3");
-
-  // Serial.print(adc_ch0);
-  // Serial.print("\t|\t");
-  // Serial.print(adc_ch1);
-  // Serial.print("\t|\t");
-  // Serial.print(adc_ch2);
-  // Serial.print("\t|\t");
-  // Serial.println(adc_ch3);
   // Serial.println("");
-  // Serial.println("");
-
-  // Serial.print("Ambient temp\t");
-  // Serial.print("\t|\t");
-  // Serial.println("Rel. Humidity");
-
-  // Serial.print(rhSensor.readTemp());
-  // Serial.print(" °C ");
-  // Serial.print(rhSensor.readHumidity());
-  // Serial.println(" % ");
-  // Serial.println("");
-
-  // Print what are we exactly writing
-  Serial.println("Writing : ");
-  Serial.println(wifi_sensor.toLineProtocol());
-  Serial.println(nrj_points.toLineProtocol());
 
   Serial.println("Wait 2s");
-  Serial.println("--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------");
-  // WebSerial.println("Wait 2s");
-  // WebSerial.println("--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------");
+  Serial.println("-------------------------------------------------------------------------------");
   }
 }
 
@@ -635,12 +528,17 @@ void Task_push_to_influxdb(void *pvParameters) // This is a task.
 {
   (void)pvParameters;
 
-  vTaskDelay(pdMS_TO_TICKS(2000)); // 2000 / portTICK_PERIOD_MS);
+  // vTaskDelay(pdMS_TO_TICKS(1000)); // 2000 / portTICK_PERIOD_MS);
 
   while (1) // A Task shall never return or exit.
   {
     Serial.println("\n---- Task_push_to_influxdb ----");
-    vTaskDelay(pdMS_TO_TICKS(2000)); // 2000 / portTICK_PERIOD_MS);
+    // Print what are we exactly writing
+    Serial.println("Writing : ");
+    Serial.println(wifi_sensor.toLineProtocol());
+    Serial.println(nrj_points.toLineProtocol());
+
+    vTaskDelay(pdMS_TO_TICKS(1000)); // 2000 / portTICK_PERIOD_MS);
 
     // Clear fields for reusing the point. Tags will remain untouched
     wifi_sensor.clearFields();
@@ -650,21 +548,11 @@ void Task_push_to_influxdb(void *pvParameters) // This is a task.
     // Report RSSI of currently connected network
     wifi_sensor.addField("rssi", WiFi.RSSI());
 
-    nrj_points.addField("ph1_amps", nrj_values[0]);
-    nrj_points.addField("ph2_amps", nrj_values[1]);
-    nrj_points.addField("ph3_amps", nrj_values[2]);
-
-    nrj_points.addField("active_power_tot", nrj_values[3]);
-    nrj_points.addField("reactive_power_tot", nrj_values[4]);
-    nrj_points.addField("apparent_power_tot", nrj_values[5]);
-
-    nrj_points.addField("l1_voltage", nrj_values[6]);
-    nrj_points.addField("l2_voltage", nrj_values[7]);
-    nrj_points.addField("l3_voltage", nrj_values[8]);
-
-    nrj_points.addField("l1_power_factor", nrj_values[9]);
-    nrj_points.addField("l2_power_factor", nrj_values[10]);
-    nrj_points.addField("l3_power_factor", nrj_values[11]);
+    nrj_points.addField("soco_volt", nrj_values[0]);
+    nrj_points.addField("soco_amps", nrj_values[1]);
+    nrj_points.addField("soco_freq", nrj_values[2]);
+    nrj_points.addField("soco_activ_pow", nrj_values[3]);
+    nrj_points.addField("soco_react_pow", nrj_values[4]);
 
     // Check WiFi connection and reconnect if needed
     if (wifiMulti.run() != WL_CONNECTED) {
