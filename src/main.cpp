@@ -52,13 +52,6 @@ uint32_t r_data1;
 uint16_t r_data_twos_comp;
 float r_datafloat1;
 
-/*
-Array for float values retrieved from NRJ meter
-pos 0 - Phase 1 amp
-pos 1 - Phase 2 amp
-pos 2 - Phase 3 amp
-pos 3 - 
-*/
 #define NRJ_ARRAY_SIZE 12
 float nrj_values[NRJ_ARRAY_SIZE];
 
@@ -331,7 +324,7 @@ void setup()
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
+  // Nothing here, all the stuffs are handled in the tasks !
 }
 
 /*--------------------------------------------------*/
@@ -423,7 +416,7 @@ void Task_retrieve_modbus_params(void *pvParameters) // This is a task.
 
     /*--------------------*/
 
-    err = MB.addRequest(9, MODBUS_NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_SOCO_TOT_POS_REACT_ENERGY);
+    err = MB.addRequest(9, MODBUS_NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_SOCO_TOT_POS_REACT_ENERGY, 2);
     if (err!=SUCCESS) {
       ModbusError e(err);
       LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
@@ -444,103 +437,6 @@ void Task_retrieve_modbus_params(void *pvParameters) // This is a task.
       ModbusError e(err);
       LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
     }
-
-    // /*---------- LEGRAND ENERGY METER QUERIES ----------*/
-
-    // // Params : Token, Slave address, Function code, Register address, Length
-    // err = MB.addRequest(5, NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_CURRENT_PH1, 2);
-    // if (err!=SUCCESS) {
-    //   ModbusError e(err);
-    //   LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
-    // }
-
-    // /*--------------------*/
-
-    // err = MB.addRequest(6, NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_CURRENT_PH2, 2);
-    // if (err!=SUCCESS) {
-    //   ModbusError e(err);
-    //   LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
-    // }
-
-    // /*--------------------*/
-
-    // err = MB.addRequest(7, NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_CURRENT_PH3, 2);
-    // if (err!=SUCCESS) {
-    //   ModbusError e(err);
-    //   LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
-    // }
-
-    // /*--------------------*/
-
-    // err = MB.addRequest(8, NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_ACTIV_POWER_TOTAL, 2);
-    // if (err!=SUCCESS) {
-    //   ModbusError e(err);
-    //   LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
-    // }
-
-    // /*--------------------*/
-
-    // err = MB.addRequest(9, NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_REACT_POWER_TOTAL, 2);
-    // if (err!=SUCCESS) {
-    //   ModbusError e(err);
-    //   LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
-    // }
-
-    // /*--------------------*/
-
-    // err = MB.addRequest(10, NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_APPAR_POWER_TOTAL, 2);
-    // if (err!=SUCCESS) {
-    //   ModbusError e(err);
-    //   LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
-    // }
-
-    // /*--------------------*/
-
-    // err = MB.addRequest(11, NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_VOLTAGE_PH1, 2);
-    // if (err!=SUCCESS) {
-    //   ModbusError e(err);
-    //   LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
-    // }
-
-    // /*--------------------*/
-
-    // err = MB.addRequest(12, NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_VOLTAGE_PH2, 2);
-    // if (err!=SUCCESS) {
-    //   ModbusError e(err);
-    //   LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
-    // }
-
-    // /*--------------------*/
-
-    // err = MB.addRequest(13, NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_VOLTAGE_PH3, 2);
-    // if (err!=SUCCESS) {
-    //   ModbusError e(err);
-    //   LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
-    // }
-
-    // /*--------------------*/
-
-    // err = MB.addRequest(14, NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_POWER_FACTOR_PH1, 1);
-    // if (err!=SUCCESS) {
-    //   ModbusError e(err);
-    //   LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
-    // }
-
-    // /*--------------------*/
-
-    // err = MB.addRequest(15, NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_POWER_FACTOR_PH2, 1);
-    // if (err!=SUCCESS) {
-    //   ModbusError e(err);
-    //   LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
-    // }
-
-    // /*--------------------*/
-
-    // err = MB.addRequest(16, NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_POWER_FACTOR_PH3, 1);
-    // if (err!=SUCCESS) {
-    //   ModbusError e(err);
-    //   LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
-    // }
   }
 }
 
