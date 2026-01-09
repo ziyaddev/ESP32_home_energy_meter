@@ -33,7 +33,8 @@ ESP8266WiFiMulti wifiMulti;
 //  Eastern: "EST5EDT"
 //  Japanesse: "JST-9"
 //  Central Europe: "CET-1CEST,M3.5.0,M10.5.0/3"
-#define TZ_INFO "CET-1CEST,M3.5.0,M10.5.0/3"
+// #define TZ_INFO "CET-1CEST,M3.5.0,M10.5.0/3"
+#define TZ_INFO "Africa/Casablanca"
 
 #define MODBUS_DIR_PIN 4 // connect DR, RE pin of MAX485 to gpio 4
 #define MODBUS_RX_PIN 16 // ESP32 Rx pin | Receiver Output (RO) of MAX485
@@ -41,6 +42,9 @@ ESP8266WiFiMulti wifiMulti;
 #define MODBUS_BAUDRATE 9600 // 19200
 
 #define MODBUS_NRJ_METER_ADDR 5
+
+#define ENABLE_INFLUXDB 0
+#define ENABLE_SERIAL_PRINT 1
 
 bool data_ready = false;
 
@@ -71,16 +75,16 @@ Point wifi_sensor("wifi_status");
 Point nrj_points("nrj_points_soco");
 
 // Set Static IP address & gateway
-IPAddress local_IP(192, 168, 1, 166);
-IPAddress gateway(192, 168, 1, 254);
-IPAddress subnet(255, 255, 255, 0);
-IPAddress dns1(192, 168, 1, 254);
-IPAddress dns2(0, 0, 0, 0);
+// IPAddress local_IP(192, 168, 1, 166);
+// IPAddress gateway(192, 168, 1, 254);
+// IPAddress subnet(255, 255, 255, 0);
+// IPAddress dns1(192, 168, 1, 254);
+// IPAddress dns2(0, 0, 0, 0);
 
 // Define an onData handler function to receive the regular responses
-// Arguments are Modbus server ID, the function code requested, the message data and length of it, 
+// Arguments are Modbus server ID, the function code requested, the message data and length of it,
 // plus a user-supplied token to identify the causing request
-void handleData(ModbusMessage response, uint8_t token) 
+void handleData(ModbusMessage response, uint8_t token)
 {
   Serial.printf("Response: serverID=%d, FC=%d, Token=%08X, length=%d:\n", response.getServerID(), response.getFunctionCode(), token, response.size());
   for (auto& byte : response) {
@@ -90,7 +94,7 @@ void handleData(ModbusMessage response, uint8_t token)
   Serial.printf("\n\n");
   // First value is on pos 3, after server ID, function code and length byte
   r_data1 = (response[3] << 8) | response[4] ;
-  
+
   /** Code sandbox tested at onlinegdb.com **
     uint16_t data = 32767;
     uint16_t datainv = 0;
@@ -102,7 +106,7 @@ void handleData(ModbusMessage response, uint8_t token)
     printf("datainv = %X\n", datainv);
     printf("datainv = %d\n", datainv);
     printf("datafloat = %.2f", datafloat);
-    
+
     65535 / 2 = 32767
     65535 = -1
 
@@ -149,39 +153,39 @@ void handleData(ModbusMessage response, uint8_t token)
     nrj_values[4] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
     break;
 
-  // 10 REG_APPAR_POWER_TOTAL  2
+  // 5 REG_SOCO_APPAR_POWER
   case 5:
-    nrj_values[5] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.01;
+    nrj_values[5] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
     break;
 
-  // 11 REG_VOLTAGE_PH1        2
+  // 6 REG_SOCO_SUM_POWER_FACTOR
   case 6:
     nrj_values[6] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 1000;
     break;
 
-  // 12 REG_VOLTAGE_PH2        2
+  // 7 REG_SOCO_PH1_POWER_FACTOR
   case 7:
     nrj_values[7] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 1000;
     break;
 
-  // 13 REG_VOLTAGE_PH3        2
+  // 8 REG_SOCO_TOT_POS_ACT_ENERGY
   case 8:
-    nrj_values[8] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 1000;
+    nrj_values[8] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
     break;
 
-  // 14 REG_POWER_FACTOR_PH1   1
+  // 9 REG_SOCO_TOT_POS_REACT_ENERGY
   case 9:
-    nrj_values[9] = float((response[3] << 8) | response[4]) / 100;
+    nrj_values[9] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
     break;
 
-  // 15 REG_POWER_FACTOR_PH2   1
+  // 10 REG_SOCO_TOT_NEG_ACT_ENERGY
   case 10:
-    nrj_values[10] = float((response[3] << 8) | response[4]) / 100;
+    nrj_values[10] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
     break;
 
-  // 16 REG_POWER_FACTOR_PH3   1
-  case 12:
-    nrj_values[11] = float((response[3] << 8) | response[4]) / 100;
+  // 11 REG_SOCO_TOT_NEG_REACT_ENERGY
+  case 11:
+    nrj_values[11] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
     break;
 
   default:
@@ -194,7 +198,7 @@ void handleData(ModbusMessage response, uint8_t token)
 
 // Define an onError handler function to receive error responses
 // Arguments are the error code returned and a user-supplied token to identify the causing request
-void handleError(Error error, uint8_t token) 
+void handleError(Error error, uint8_t token)
 {
   // ModbusError wraps the error code and provides a readable error message for it
   ModbusError me(error);
@@ -239,9 +243,9 @@ void setup()
   wifiMulti.addAP(WIFI_SSID_2, WIFI_PASSWORD_2);
   wifiMulti.addAP(WIFI_SSID_3, WIFI_PASSWORD_3);
 
-  if (!WiFi.config(local_IP, gateway, subnet, dns1, dns2)){
-    Serial.println("Failed to configure IP address !");
-  }
+  // if (!WiFi.config(local_IP, gateway, subnet, dns1, dns2)){
+  //   Serial.println("Failed to configure IP address !");
+  // }
 
   Serial.print("Connecting to wifi");
   while (wifiMulti.run() != WL_CONNECTED) {
@@ -383,6 +387,62 @@ void Task_retrieve_modbus_params(void *pvParameters) // This is a task.
     if (err!=SUCCESS) {
       ModbusError e(err);
       LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
+    }  
+
+    /*--------------------*/
+
+    err = MB.addRequest(5, MODBUS_NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_SOCO_APPAR_POWER, 2);
+    if (err!=SUCCESS) {
+      ModbusError e(err);
+      LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
+    }
+
+    /*--------------------*/
+
+    err = MB.addRequest(6, MODBUS_NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_SOCO_SUM_POWER_FACTOR, 2);
+    if (err!=SUCCESS) {
+      ModbusError e(err);
+      LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
+    }
+
+    /*--------------------*/
+
+    err = MB.addRequest(7, MODBUS_NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_SOCO_PH1_POWER_FACTOR, 2);
+    if (err!=SUCCESS) {
+      ModbusError e(err);
+      LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
+    }
+
+    /*--------------------*/
+
+    err = MB.addRequest(8, MODBUS_NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_SOCO_TOT_POS_ACT_ENERGY, 2);
+    if (err!=SUCCESS) {
+      ModbusError e(err);
+      LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
+    }
+
+    /*--------------------*/
+
+    err = MB.addRequest(9, MODBUS_NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_SOCO_TOT_POS_REACT_ENERGY);
+    if (err!=SUCCESS) {
+      ModbusError e(err);
+      LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
+    }
+
+    /*--------------------*/
+
+    err = MB.addRequest(10, MODBUS_NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_SOCO_TOT_NEG_ACT_ENERGY, 2);
+    if (err!=SUCCESS) {
+      ModbusError e(err);
+      LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
+    }
+
+    /*--------------------*/
+
+    err = MB.addRequest(11, MODBUS_NRJ_METER_ADDR, READ_HOLD_REGISTER, REG_SOCO_TOT_NEG_REACT_ENERGY, 2);
+    if (err!=SUCCESS) {
+      ModbusError e(err);
+      LOG_E("Error creating request: %02X - %s\n", (int)e, (const char *)e);
     }
 
     // /*---------- LEGRAND ENERGY METER QUERIES ----------*/
@@ -490,37 +550,47 @@ void Task_print_values(void *pvParameters) // This is a task.
 
   while (1) // A Task shall never return or exit.
   {
-    Serial.println("\n---- Task_print_values ----");
-    vTaskDelay(pdMS_TO_TICKS(1000)); // 2000 / portTICK_PERIOD_MS);
+    if (ENABLE_SERIAL_PRINT)
+    {
+      Serial.println("\n---- Task_print_values ----");
+      vTaskDelay(pdMS_TO_TICKS(1000)); // 2000 / portTICK_PERIOD_MS);
 
-    Serial.printf("NRJ Voltage : %.2f V\n", nrj_values[0]);
-    Serial.printf("NRJ Current : %.2f A\n", nrj_values[1]);
-    Serial.printf("NRJ Frequency : %.2f Hz\n", nrj_values[2]);
-    Serial.printf("NRJ Active Power : %.2f W\n", nrj_values[3]);
-    Serial.printf("NRJ Reactive Power : %.2f VAR\n\n", nrj_values[4]);
+      Serial.printf("NRJ Voltage : %.2f V\n", nrj_values[0]);
+      Serial.printf("NRJ Current : %.2f A\n", nrj_values[1]);
+      Serial.printf("NRJ Frequency : %.2f Hz\n", nrj_values[2]);
+      Serial.printf("NRJ Active Power : %.2f W\n", nrj_values[3]);
+      Serial.printf("NRJ Reactive Power : %.2f VAR\n\n", nrj_values[4]);
+      Serial.printf("NRJ Apparent Power : %.2f VAR\n\n", nrj_values[5]);
+      Serial.printf("NRJ Sum Power Factor : %.2f\n\n", nrj_values[6]);
+      Serial.printf("NRJ PH1 Power Factor : %.2f\n\n", nrj_values[7]);
+      Serial.printf("NRJ Total Positive Active Energy : %.2f Wh\n\n", nrj_values[8]);
+      Serial.printf("NRJ Total Positive Reactive Energy : %.2f Wh\n\n", nrj_values[9]);
+      Serial.printf("NRJ Total Negative Active Energy : %.2f Wh\n\n", nrj_values[10]);
+      Serial.printf("NRJ Total Negative Reactive Energy : %.2f Wh\n\n", nrj_values[11]);
 
-  // Serial.print("unixtime : ");
-  // Serial.println(now.unixtime(), DEC);
-  // Serial.println();
-  // Serial.print(now.year(), DEC);
-  // Serial.print('/');
-  // Serial.print(now.month(), DEC);
-  // Serial.print('/');
-  // Serial.print(now.day(), DEC);
-  // Serial.print(" (");
-  // Serial.print(daysOfTheWeek[now.dayOfTheWeek()]);
-  // Serial.print(") ");
-  // Serial.print(now.hour(), DEC);
-  // Serial.print(':');
-  // Serial.print(now.minute(), DEC);
-  // Serial.print(':');
-  // Serial.println(now.second(), DEC);
-  // Serial.println();
+    // Serial.print("unixtime : ");
+    // Serial.println(now.unixtime(), DEC);
+    // Serial.println();
+    // Serial.print(now.year(), DEC);
+    // Serial.print('/');
+    // Serial.print(now.month(), DEC);
+    // Serial.print('/');
+    // Serial.print(now.day(), DEC);
+    // Serial.print(" (");
+    // Serial.print(daysOfTheWeek[now.dayOfTheWeek()]);
+    // Serial.print(") ");
+    // Serial.print(now.hour(), DEC);
+    // Serial.print(':');
+    // Serial.print(now.minute(), DEC);
+    // Serial.print(':');
+    // Serial.println(now.second(), DEC);
+    // Serial.println();
 
-  // Serial.println("");
+    // Serial.println("");
 
-  Serial.println("Wait 2s");
-  Serial.println("-------------------------------------------------------------------------------");
+    Serial.println("Wait 2s");
+    Serial.println("-------------------------------------------------------------------------------");
+    }
   }
 }
 
@@ -532,44 +602,55 @@ void Task_push_to_influxdb(void *pvParameters) // This is a task.
 
   while (1) // A Task shall never return or exit.
   {
-    Serial.println("\n---- Task_push_to_influxdb ----");
-    // Print what are we exactly writing
-    Serial.println("Writing : ");
-    Serial.println(wifi_sensor.toLineProtocol());
-    Serial.println(nrj_points.toLineProtocol());
+    if (ENABLE_INFLUXDB)
+    {
+      Serial.println("\n---- Task_push_to_influxdb ----");
+      // Print what are we exactly writing
+      Serial.println("Writing : ");
+      Serial.println(wifi_sensor.toLineProtocol());
+      Serial.println(nrj_points.toLineProtocol());
 
-    vTaskDelay(pdMS_TO_TICKS(1000)); // 2000 / portTICK_PERIOD_MS);
+      vTaskDelay(pdMS_TO_TICKS(1000)); // 2000 / portTICK_PERIOD_MS);
 
-    // Clear fields for reusing the point. Tags will remain untouched
-    wifi_sensor.clearFields();
-    nrj_points.clearFields();
+      // Clear fields for reusing the point. Tags will remain untouched
+      wifi_sensor.clearFields();
+      nrj_points.clearFields();
 
-    // Store measured value into point
-    // Report RSSI of currently connected network
-    wifi_sensor.addField("rssi", WiFi.RSSI());
+      // Store measured value into point
+      // Report RSSI of currently connected network
+      wifi_sensor.addField("rssi", WiFi.RSSI());
 
-    nrj_points.addField("soco_volt", nrj_values[0]);
-    nrj_points.addField("soco_amps", nrj_values[1]);
-    nrj_points.addField("soco_freq", nrj_values[2]);
-    nrj_points.addField("soco_activ_pow", nrj_values[3]);
-    nrj_points.addField("soco_react_pow", nrj_values[4]);
+      nrj_points.addField("soco_volt", nrj_values[0]);
+      nrj_points.addField("soco_amps", nrj_values[1]);
+      nrj_points.addField("soco_freq", nrj_values[2]);
+      nrj_points.addField("soco_activ_pow", nrj_values[3]);
+      nrj_points.addField("soco_react_pow", nrj_values[4]);
+      nrj_points.addField("soco_appart_pow", nrj_values[5]);
+      nrj_points.addField("soco_sum_pow_fact", nrj_values[6]);
+      nrj_points.addField("soco_ph1_pow_fact", nrj_values[7]);
+      nrj_points.addField("soco_tot_pos_act_energy", nrj_values[8]);
+      nrj_points.addField("soco_tot_pos_react_energy", nrj_values[9]);
+      nrj_points.addField("soco_tot_neg_act_energy", nrj_values[10]);
+      nrj_points.addField("soco_tot_neg_react_energy", nrj_values[11]);
 
-    // Check WiFi connection and reconnect if needed
-    if (wifiMulti.run() != WL_CONNECTED) {
-      Serial.println("Wifi connection lost");
-    }
 
-    // Write point
-    if (!influxDBclient.writePoint(wifi_sensor)) {
-      Serial.print("InfluxDB write failed: ");
-      Serial.println(influxDBclient.getLastErrorMessage());
-      wifiMulti.run();
-    }
+      // Check WiFi connection and reconnect if needed
+      if (wifiMulti.run() != WL_CONNECTED) {
+        Serial.println("Wifi connection lost");
+      }
 
-    if (!influxDBclient.writePoint(nrj_points)) {
-      Serial.print("InfluxDB write failed: ");
-      Serial.println(influxDBclient.getLastErrorMessage());
-      wifiMulti.run();
+      // Write point
+      if (!influxDBclient.writePoint(wifi_sensor)) {
+        Serial.print("InfluxDB write failed: ");
+        Serial.println(influxDBclient.getLastErrorMessage());
+        wifiMulti.run();
+      }
+
+      if (!influxDBclient.writePoint(nrj_points)) {
+        Serial.print("InfluxDB write failed: ");
+        Serial.println(influxDBclient.getLastErrorMessage());
+        wifiMulti.run();
+      }
     }
   }
 }
