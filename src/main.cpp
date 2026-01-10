@@ -455,13 +455,13 @@ void Task_print_values(void *pvParameters) // This is a task.
       Serial.printf("NRJ Current : %.2f A\n", nrj_values[1]);
       Serial.printf("NRJ Frequency : %.2f Hz\n", nrj_values[2]);
       Serial.printf("NRJ Active Power : %.2f W\n", nrj_values[3]);
-      Serial.printf("NRJ Reactive Power : %.2f VAR\n\n", nrj_values[4]);
-      Serial.printf("NRJ Apparent Power : %.2f VAR\n\n", nrj_values[5]);
-      Serial.printf("NRJ Sum Power Factor : %.2f\n\n", nrj_values[6]);
-      Serial.printf("NRJ PH1 Power Factor : %.2f\n\n", nrj_values[7]);
-      Serial.printf("NRJ Total Positive Active Energy : %.2f Wh\n\n", nrj_values[8]);
-      Serial.printf("NRJ Total Positive Reactive Energy : %.2f Wh\n\n", nrj_values[9]);
-      Serial.printf("NRJ Total Negative Active Energy : %.2f Wh\n\n", nrj_values[10]);
+      Serial.printf("NRJ Reactive Power : %.2f VAR\n", nrj_values[4]);
+      Serial.printf("NRJ Apparent Power : %.2f VAR\n", nrj_values[5]);
+      Serial.printf("NRJ Sum Power Factor : %.2f\n", nrj_values[6]);
+      Serial.printf("NRJ PH1 Power Factor : %.2f\n", nrj_values[7]);
+      Serial.printf("NRJ Total Positive Active Energy : %.2f Wh\n", nrj_values[8]);
+      Serial.printf("NRJ Total Positive Reactive Energy : %.2f Wh\n", nrj_values[9]);
+      Serial.printf("NRJ Total Negative Active Energy : %.2f Wh\n", nrj_values[10]);
       Serial.printf("NRJ Total Negative Reactive Energy : %.2f Wh\n\n", nrj_values[11]);
 
     // Serial.print("unixtime : ");
