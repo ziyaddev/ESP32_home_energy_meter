@@ -43,7 +43,7 @@ ESP8266WiFiMulti wifiMulti;
 
 #define MODBUS_NRJ_METER_ADDR 5
 
-#define ENABLE_INFLUXDB 0
+#define ENABLE_INFLUXDB 1
 #define ENABLE_SERIAL_PRINT 1
 
 bool data_ready = false;
@@ -52,8 +52,10 @@ uint32_t r_data1;
 uint16_t r_data_twos_comp;
 float r_datafloat1;
 
-#define NRJ_ARRAY_SIZE 12
-float nrj_values[NRJ_ARRAY_SIZE];
+// #define NRJ_ARRAY_SIZE 12
+// float nrj_values[NRJ_ARRAY_SIZE];
+float nrj_values_flt[5];
+int nrj_values_int[7];
 
 // Create a ModbusRTU client instance
 // In my case the RS485 module had auto halfduplex, so no second parameter with the DE/RE pin is required!
@@ -123,62 +125,62 @@ void handleData(ModbusMessage response, uint8_t token)
 
   // 0 REG_SOCO_VOLTAGE
   case 0:
-    nrj_values[0] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 100;
+    nrj_values_flt[0] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 100;
     break;
 
   // 1 REG_SOCO_CURRENT
   case 1:
-    nrj_values[1] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 1000;
+    nrj_values_flt[1] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 1000;
     break;
 
   // 2 REG_SOCO_FREQ
   case 2:
-    nrj_values[2] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 1000;
+    nrj_values_flt[2] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 1000;
     break;
 
   // 3 REG_SOCO_ACTIV_POWER
   case 3:
-    nrj_values[3] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
+    nrj_values_int[0] = int((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
     break;
 
   // 4 REG_SOCO_REACT_POWER
   case 4:
-    nrj_values[4] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
+    nrj_values_int[1] = int((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
     break;
 
   // 5 REG_SOCO_APPAR_POWER
   case 5:
-    nrj_values[5] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
+    nrj_values_int[2] = int((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
     break;
 
   // 6 REG_SOCO_SUM_POWER_FACTOR
   case 6:
-    nrj_values[6] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 1000;
+    nrj_values_flt[3] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 1000;
     break;
 
   // 7 REG_SOCO_PH1_POWER_FACTOR
   case 7:
-    nrj_values[7] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 1000;
+    nrj_values_flt[4] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 1000;
     break;
 
   // 8 REG_SOCO_TOT_POS_ACT_ENERGY
   case 8:
-    nrj_values[8] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
+    nrj_values_int[3] = int((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
     break;
 
   // 9 REG_SOCO_TOT_POS_REACT_ENERGY
   case 9:
-    nrj_values[9] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
+    nrj_values_int[4] = int((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
     break;
 
   // 10 REG_SOCO_TOT_NEG_ACT_ENERGY
   case 10:
-    nrj_values[10] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
+    nrj_values_int[5] = int((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
     break;
 
   // 11 REG_SOCO_TOT_NEG_REACT_ENERGY
   case 11:
-    nrj_values[11] = float((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
+    nrj_values_int[6] = int((response[3] << 24) | (response[4] << 16) | (response[5] << 8) | response[6]) / 0.1;
     break;
 
   default:
@@ -451,18 +453,18 @@ void Task_print_values(void *pvParameters) // This is a task.
       Serial.println("\n---- Task_print_values ----");
       vTaskDelay(pdMS_TO_TICKS(1000)); // 2000 / portTICK_PERIOD_MS);
 
-      Serial.printf("NRJ Voltage : %.2f V\n", nrj_values[0]);
-      Serial.printf("NRJ Current : %.2f A\n", nrj_values[1]);
-      Serial.printf("NRJ Frequency : %.2f Hz\n", nrj_values[2]);
-      Serial.printf("NRJ Active Power : %.2f W\n", nrj_values[3]);
-      Serial.printf("NRJ Reactive Power : %.2f VAR\n", nrj_values[4]);
-      Serial.printf("NRJ Apparent Power : %.2f VAR\n", nrj_values[5]);
-      Serial.printf("NRJ Sum Power Factor : %.2f\n", nrj_values[6]);
-      Serial.printf("NRJ PH1 Power Factor : %.2f\n", nrj_values[7]);
-      Serial.printf("NRJ Total Positive Active Energy : %.2f Wh\n", nrj_values[8]);
-      Serial.printf("NRJ Total Positive Reactive Energy : %.2f Wh\n", nrj_values[9]);
-      Serial.printf("NRJ Total Negative Active Energy : %.2f Wh\n", nrj_values[10]);
-      Serial.printf("NRJ Total Negative Reactive Energy : %.2f Wh\n\n", nrj_values[11]);
+      Serial.printf("NRJ Voltage : %.2f V\n", nrj_values_flt[0]);
+      Serial.printf("NRJ Current : %.2f A\n", nrj_values_flt[1]);
+      Serial.printf("NRJ Frequency : %.2f Hz\n", nrj_values_flt[2]);
+      Serial.printf("NRJ Active Power : %d W\n", nrj_values_int[0]);
+      Serial.printf("NRJ Reactive Power : %d VAR\n", nrj_values_int[1]);
+      Serial.printf("NRJ Apparent Power : %d VAR\n", nrj_values_int[2]);
+      Serial.printf("NRJ Sum Power Factor : %.2f\n", nrj_values_flt[3]);
+      Serial.printf("NRJ PH1 Power Factor : %.2f\n", nrj_values_flt[4]);
+      Serial.printf("NRJ Total Positive Active Energy : %d Wh\n", nrj_values_int[3]);
+      Serial.printf("NRJ Total Positive Reactive Energy : %d Wh\n", nrj_values_int[4]);
+      Serial.printf("NRJ Total Negative Active Energy : %d Wh\n", nrj_values_int[5]);
+      Serial.printf("NRJ Total Negative Reactive Energy : %d Wh\n\n", nrj_values_int[6]);
 
     // Serial.print("unixtime : ");
     // Serial.println(now.unixtime(), DEC);
@@ -516,19 +518,18 @@ void Task_push_to_influxdb(void *pvParameters) // This is a task.
       // Report RSSI of currently connected network
       wifi_sensor.addField("rssi", WiFi.RSSI());
 
-      nrj_points.addField("soco_volt", nrj_values[0]);
-      nrj_points.addField("soco_amps", nrj_values[1]);
-      nrj_points.addField("soco_freq", nrj_values[2]);
-      nrj_points.addField("soco_activ_pow", nrj_values[3]);
-      nrj_points.addField("soco_react_pow", nrj_values[4]);
-      nrj_points.addField("soco_appart_pow", nrj_values[5]);
-      nrj_points.addField("soco_sum_pow_fact", nrj_values[6]);
-      nrj_points.addField("soco_ph1_pow_fact", nrj_values[7]);
-      nrj_points.addField("soco_tot_pos_act_energy", nrj_values[8]);
-      nrj_points.addField("soco_tot_pos_react_energy", nrj_values[9]);
-      nrj_points.addField("soco_tot_neg_act_energy", nrj_values[10]);
-      nrj_points.addField("soco_tot_neg_react_energy", nrj_values[11]);
-
+      nrj_points.addField("soco_volt", nrj_values_flt[0]);
+      nrj_points.addField("soco_amps", nrj_values_flt[1]);
+      nrj_points.addField("soco_freq", nrj_values_flt[2]);
+      nrj_points.addField("soco_activ_pow", nrj_values_int[0]);
+      nrj_points.addField("soco_react_pow", nrj_values_int[1]);
+      nrj_points.addField("soco_appart_pow", nrj_values_int[2]);
+      nrj_points.addField("soco_sum_pow_fact", nrj_values_flt[3]);
+      nrj_points.addField("soco_ph1_pow_fact", nrj_values_flt[4]);
+      nrj_points.addField("soco_tot_pos_act_energy", nrj_values_int[3]);
+      nrj_points.addField("soco_tot_pos_react_energy", nrj_values_int[4]);
+      nrj_points.addField("soco_tot_neg_act_energy", nrj_values_int[5]);
+      nrj_points.addField("soco_tot_neg_react_energy", nrj_values_int[6]);
 
       // Check WiFi connection and reconnect if needed
       if (wifiMulti.run() != WL_CONNECTED) {
