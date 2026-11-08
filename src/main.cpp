@@ -4,6 +4,7 @@
 #include <WiFiAP.h>
 #include <WiFiClient.h>
 #include <WiFi_credentials.h>
+#include <EspDash.h>
 
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
@@ -68,6 +69,8 @@ InfluxDBClient influxDBclient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLU
 // Data point
 Point wifi_sensor("wifi_status");
 Point nrj_points("nrj_points_soco");
+
+EspDash dash(80);
 
 // Set Static IP address & gateway
 // IPAddress local_IP(192, 168, 1, 166);
@@ -209,6 +212,10 @@ void setup()
   Serial.begin(115200);
   while (!Serial) {}
   Serial.printf("__ SERIAL OK __\n");
+
+  dash.autoConnect();
+
+  dash.begin("admin", "admin");
 
   // ************************ InfluxDB init ************************ //
   // Setup wifi
