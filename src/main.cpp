@@ -5,6 +5,7 @@
 #include <WiFiClient.h>
 #include <WiFi_credentials.h>
 #include <EspDash.h>
+#include <esp_task_wdt.h>
 
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
@@ -16,7 +17,18 @@
 #include "socomec_modbus_registers.h"
 
 #include <InfluxDbClient.h>
-#include <InfluxDbCloud.h>
+#include "ca_certs.h"
+
+// Dashboard login (OTA is behind it). Override in WiFi_credentials.h.
+#ifndef DASH_USER
+#define DASH_USER "admin"
+#endif
+#ifndef DASH_PASSWORD
+#define DASH_PASSWORD "admin"
+#endif
+
+struct WifiNetwork { const char *ssid; const char *password; };
+static const WifiNetwork wifi_networks[] = { WIFI_NETWORKS };
 
 #if defined(ESP32)
 #include <WiFiMulti.h>
@@ -35,7 +47,8 @@ ESP8266WiFiMulti wifiMulti;
 //  Japanesse: "JST-9"
 //  Central Europe: "CET-1CEST,M3.5.0,M10.5.0/3"
 // #define TZ_INFO "CET-1CEST,M3.5.0,M10.5.0/3"
-#define TZ_INFO "Africa/Casablanca"
+// ESP32 needs a POSIX TZ string, not an Olson name ("Africa/Casablanca" is ignored -> UTC).
+#define TZ_INFO "<+01>-1"
 
 #define MODBUS_DIR_PIN 4 // connect DR, RE pin of MAX485 to gpio 4
 #define MODBUS_RX_PIN 16 // ESP32 Rx pin | Receiver Output (RO) of MAX485
@@ -63,12 +76,20 @@ int nrj_values_int[7];
 HardwareSerial Serial_RS485(2);
 ModbusClientRTU MB(MODBUS_DIR_PIN);
 
-// InfluxDB client instance with preconfigured InfluxCloud certificate
-InfluxDBClient influxDBclient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN, InfluxDbCloud2CACert);
+// InfluxDB v2 client (Telegraf listener behind HTTPS), server cert verified against ISRG roots
+InfluxDBClient influxDBclient(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN, INGEST_CA_CERTS);
 
-// Data point
-Point wifi_sensor("wifi_status");
-Point nrj_points("nrj_points_soco");
+// IoT schema v1 identifiers (see iot-schema/vocabulaire.yaml on the VPS).
+// Any extra tag or field makes telegraf-iot reject the line into `iot_rejected`.
+#define IOT_SITE        "home"
+#define IOT_METER_TYPE  "energy_meter"
+#define IOT_METER_ID    "socomec_main"
+#define IOT_NODE_ID     "esp32_socomec"   // also used as device_id
+
+// One bit per Modbus token: telemetry is only pushed once every register has been read,
+// so the cumulative energy indexes never go back to 0 after a reboot.
+#define MODBUS_ALL_TOKENS 0x0FFFu
+volatile uint32_t modbus_received_mask = 0;
 
 EspDash dash(80);
 
@@ -190,6 +211,10 @@ void handleData(ModbusMessage response, uint8_t token)
     break;
   }
 
+  if (token < 12) {
+    modbus_received_mask |= (1u << token);
+  }
+
   // Signal "data is complete"
   data_ready = true;
 }
@@ -215,11 +240,11 @@ void setup()
 
   dash.autoConnect();
 
-  dash.begin("admin", "admin");
+  dash.begin(DASH_USER, DASH_PASSWORD);
 
   // ************************ InfluxDB init ************************ //
-  // Setup wifi
-  WiFi.mode(WIFI_AP_STA);
+  // Setup wifi (STA only: AP_STA would expose an open soft-AP)
+  WiFi.mode(WIFI_STA);
 
   int n_wifi = WiFi.scanNetworks();
   Serial.println("scan done");
@@ -241,9 +266,9 @@ void setup()
     }
   }
 
-  wifiMulti.addAP(WIFI_SSID_1, WIFI_PASSWORD_1);
-  wifiMulti.addAP(WIFI_SSID_2, WIFI_PASSWORD_2);
-  wifiMulti.addAP(WIFI_SSID_3, WIFI_PASSWORD_3);
+  for (const auto &net : wifi_networks) {
+    wifiMulti.addAP(net.ssid, net.password);
+  }
 
   // if (!WiFi.config(local_IP, gateway, subnet, dns1, dns2)){
   //   Serial.println("Failed to configure IP address !");
@@ -272,15 +297,13 @@ void setup()
   Serial.print("DNS 2 : ");
   Serial.println(WiFi.dnsIP(1));
 
-  // Add tags
-  wifi_sensor.addTag("device", DEVICE);
-  wifi_sensor.addTag("SSID", WiFi.SSID());
-  nrj_points.addTag("socomec", "4850 3043");
-
   // Accurate time is necessary for certificate validation and writing in batches
   // For the fastest time sync find NTP servers in your area: https://www.pool.ntp.org/zone/
   // Syncing progress and the time will be printed to Serial.
   timeSync(TZ_INFO, "pool.ntp.org", "time.nis.gov");
+
+  // Keep the TLS session open between writes (avoids a full handshake every second)
+  influxDBclient.setHTTPOptions(HTTPOptions().connectionReuse(true));
 
   // Check server connection
   if (influxDBclient.validateConnection()) {
@@ -326,14 +349,28 @@ void setup()
 
   Serial.println(xTaskCreate(Task_push_to_influxdb,
                           "Task_push_to_influxdb",
-                          10000,
+                          16384, // TLS handshake needs headroom
                           NULL,
                           4,
                           NULL));
+
+  // dash.handle() calls esp_task_wdt_reset() on every loop(): loopTask must be subscribed
+  // to the task watchdog, otherwise it floods the UART with "task not found" errors.
+  // 15 s leaves room for the dashboard's synchronous WiFi scan and OTA upload chunks.
+  esp_task_wdt_config_t twdt_config = {
+    .timeout_ms = 15000,
+    .idle_core_mask = (1 << 0), // keep the core default: watch CPU0 idle task only
+    .trigger_panic = true,
+  };
+  esp_task_wdt_reconfigure(&twdt_config);
+  esp_task_wdt_add(NULL);
 }
 
 void loop() {
-  // Nothing here, all the stuffs are handled in the tasks !
+  // Modbus / print / InfluxDB are handled in their tasks.
+  // The dashboard (incl. OTA on /update) uses the synchronous WebServer: it must be polled here.
+  dash.handle();
+  delay(2);
 }
 
 /*--------------------------------------------------*/
@@ -499,62 +536,83 @@ void Task_print_values(void *pvParameters) // This is a task.
   }
 }
 
+// Append one IoT schema v1 line: <property>,site,asset_type,asset_id,data_kind value=<float>,device_id="..."
+static void addSchemaLine(String &body, const char *property, const char *assetType,
+                          const char *assetId, const char *dataKind, double value, int decimals)
+{
+  Point p(property);
+  p.addTag("site", IOT_SITE);
+  p.addTag("asset_type", assetType);
+  p.addTag("asset_id", assetId);
+  p.addTag("data_kind", dataKind);
+  p.addField("value", value, decimals);
+  p.addField("device_id", IOT_NODE_ID);
+  body += p.toLineProtocol();
+  body += '\n';
+}
+
+static void addMeterLine(String &body, const char *dataKind, double value, int decimals)
+{
+  addSchemaLine(body, "telemetry", IOT_METER_TYPE, IOT_METER_ID, dataKind, value, decimals);
+}
+
+static void addNodeLine(String &body, const char *dataKind, double value)
+{
+  addSchemaLine(body, "status", "node", IOT_NODE_ID, dataKind, value, 0);
+}
+
 void Task_push_to_influxdb(void *pvParameters) // This is a task.
 {
   (void)pvParameters;
 
-  // vTaskDelay(pdMS_TO_TICKS(1000)); // 2000 / portTICK_PERIOD_MS);
-
   while (1) // A Task shall never return or exit.
   {
-    if (ENABLE_INFLUXDB)
-    {
-      Serial.println("\n---- Task_push_to_influxdb ----");
-      // Print what are we exactly writing
-      Serial.println("Writing : ");
-      Serial.println(wifi_sensor.toLineProtocol());
-      Serial.println(nrj_points.toLineProtocol());
+    vTaskDelay(pdMS_TO_TICKS(1000));
 
-      vTaskDelay(pdMS_TO_TICKS(1000)); // 2000 / portTICK_PERIOD_MS);
+    if (!ENABLE_INFLUXDB)
+      continue;
 
-      // Clear fields for reusing the point. Tags will remain untouched
-      wifi_sensor.clearFields();
-      nrj_points.clearFields();
+    Serial.println("\n---- Task_push_to_influxdb ----");
 
-      // Store measured value into point
-      // Report RSSI of currently connected network
-      wifi_sensor.addField("rssi", WiFi.RSSI());
+    String body;
+    body.reserve(2600);
 
-      nrj_points.addField("soco_volt", nrj_values_flt[0]);
-      nrj_points.addField("soco_amps", nrj_values_flt[1]);
-      nrj_points.addField("soco_freq", nrj_values_flt[2]);
-      nrj_points.addField("soco_activ_pow", nrj_values_int[0]);
-      nrj_points.addField("soco_react_pow", nrj_values_int[1]);
-      nrj_points.addField("soco_appart_pow", nrj_values_int[2]);
-      nrj_points.addField("soco_sum_pow_fact", nrj_values_flt[3]);
-      nrj_points.addField("soco_ph1_pow_fact", nrj_values_flt[4]);
-      nrj_points.addField("soco_tot_pos_act_energy", nrj_values_int[3]);
-      nrj_points.addField("soco_tot_pos_react_energy", nrj_values_int[4]);
-      nrj_points.addField("soco_tot_neg_act_energy", nrj_values_int[5]);
-      nrj_points.addField("soco_tot_neg_react_energy", nrj_values_int[6]);
+    // Node health (status)
+    addNodeLine(body, "rssi", WiFi.RSSI());
+    addNodeLine(body, "uptime", millis() / 1000UL);
+    addNodeLine(body, "free_heap", ESP.getFreeHeap());
 
-      // Check WiFi connection and reconnect if needed
-      if (wifiMulti.run() != WL_CONNECTED) {
-        Serial.println("Wifi connection lost");
-      }
+    // Meter telemetry, converted to the schema units (W, VA, var, kWh, kvarh)
+    if (modbus_received_mask == MODBUS_ALL_TOKENS) {
+      addMeterLine(body, "voltage",                nrj_values_flt[0], 2);
+      addMeterLine(body, "current",                nrj_values_flt[1], 3);
+      addMeterLine(body, "frequency",              nrj_values_flt[2], 3);
+      addMeterLine(body, "power",                  nrj_values_int[0], 1);
+      addMeterLine(body, "reactive_power",         nrj_values_int[1], 1);
+      addMeterLine(body, "apparent_power",         nrj_values_int[2], 1);
+      addMeterLine(body, "power_factor",           nrj_values_flt[3], 3);
+      addMeterLine(body, "energy",                 nrj_values_int[3] / 1000.0, 3);
+      addMeterLine(body, "reactive_energy",        nrj_values_int[4] / 1000.0, 3);
+      addMeterLine(body, "energy_export",          nrj_values_int[5] / 1000.0, 3);
+      addMeterLine(body, "reactive_energy_export", nrj_values_int[6] / 1000.0, 3);
+    } else {
+      Serial.printf("Modbus not complete yet (mask 0x%03X), telemetry skipped\n",
+                    (unsigned)modbus_received_mask);
+    }
 
-      // Write point
-      if (!influxDBclient.writePoint(wifi_sensor)) {
-        Serial.print("InfluxDB write failed: ");
-        Serial.println(influxDBclient.getLastErrorMessage());
-        wifiMulti.run();
-      }
+    Serial.print("Writing :\n");
+    Serial.print(body);
 
-      if (!influxDBclient.writePoint(nrj_points)) {
-        Serial.print("InfluxDB write failed: ");
-        Serial.println(influxDBclient.getLastErrorMessage());
-        wifiMulti.run();
-      }
+    // Check WiFi connection and reconnect if needed
+    if (wifiMulti.run() != WL_CONNECTED) {
+      Serial.println("Wifi connection lost");
+      continue;
+    }
+
+    // Single HTTPS POST for all lines
+    if (!influxDBclient.writeRecord(body)) {
+      Serial.print("InfluxDB write failed: ");
+      Serial.println(influxDBclient.getLastErrorMessage());
     }
   }
 }
